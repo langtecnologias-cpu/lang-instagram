@@ -1,10 +1,11 @@
-# Publica no Instagram da LANG. Roda todo dia às 12h (stories) e às 19h (post principal), horário de Brasília = 15:00 e 22:00 UTC.
-# O GitHub pode atrasar o horário em alguns minutos; o script publica o que estiver "devido" e ainda não saiu.
+# Publica no Instagram. Roda a cada 10 minutos entre 07h e 21h (Brasília) = 10:00 a 23:59 UTC.
+# O script publica o que estiver "devido" (horário do calendario.csv já passou) e ainda não saiu.
+# O GitHub pode atrasar o horário em alguns minutos.
 name: postar-no-instagram
 on:
   schedule:
-    - cron: "0 15 * * *"
-    - cron: "0 22 * * *"
+    - cron: "*/10 10-23 * * *"
+    - cron: "5 14 * * *"
   workflow_dispatch:
     inputs:
       modo:
@@ -13,7 +14,7 @@ on:
         type: choice
         options: [verificar, simular, publicar]
       id:
-        description: "Opcional: publicar agora a linha com este id (teste), ex.: S01"
+        description: "Opcional: publicar agora a linha com este id (teste)"
         required: false
 permissions:
   contents: write
@@ -35,8 +36,8 @@ jobs:
       - name: Verificar token
         if: github.event_name == 'schedule' || inputs.modo == 'verificar'
         run: python publicar.py --verificar
-      - name: Renovar token (mantém a validade sempre em ~60 dias)
-        if: github.event_name == 'schedule'
+      - name: Renovar token (1 vez por dia, mantém a validade em ~60 dias)
+        if: github.event.schedule == '5 14 * * *'
         run: python publicar.py --renovar || echo "::warning::não consegui renovar o token agora"
       - name: Simular
         if: inputs.modo == 'simular'
@@ -45,7 +46,7 @@ jobs:
         if: github.event_name == 'schedule' || inputs.modo == 'publicar'
         run: python publicar.py ${{ inputs.id != '' && format('--id={0}', inputs.id) || '' }}
       - name: Guardar o registro do que foi publicado
-        if: github.event_name == 'schedule' || inputs.modo == 'publicar'
+        if: always() && (github.event_name == 'schedule' || inputs.modo == 'publicar')
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
