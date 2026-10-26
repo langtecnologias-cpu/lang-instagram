@@ -1,0 +1,55 @@
+# Publica no Instagram da LANG. Roda todo dia às 12h (stories) e às 19h (post principal), horário de Brasília = 15:00 e 22:00 UTC.
+# O GitHub pode atrasar o horário em alguns minutos; o script publica o que estiver "devido" e ainda não saiu.
+name: postar-no-instagram
+on:
+  schedule:
+    - cron: "0 15 * * *"
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "verificar = só testa o token | simular = mostra o que publicaria | publicar = publica o que estiver devido"
+        default: "verificar"
+        type: choice
+        options: [verificar, simular, publicar]
+      id:
+        description: "Opcional: publicar agora a linha com este id (teste), ex.: S01"
+        required: false
+permissions:
+  contents: write
+concurrency:
+  group: postar
+  cancel-in-progress: false
+jobs:
+  postar:
+    runs-on: ubuntu-latest
+    env:
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      IG_TOKEN: ${{ secrets.IG_TOKEN }}
+      BASE_URL: ${{ vars.BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verificar token
+        if: github.event_name == 'schedule' || inputs.modo == 'verificar'
+        run: python publicar.py --verificar
+      - name: Renovar token (mantém a validade sempre em ~60 dias)
+        if: github.event_name == 'schedule'
+        run: python publicar.py --renovar || echo "::warning::não consegui renovar o token agora"
+      - name: Simular
+        if: inputs.modo == 'simular'
+        run: python publicar.py --simular ${{ inputs.id != '' && format('--id={0}', inputs.id) || '' }}
+      - name: Publicar o que está na hora
+        if: github.event_name == 'schedule' || inputs.modo == 'publicar'
+        run: python publicar.py ${{ inputs.id != '' && format('--id={0}', inputs.id) || '' }}
+      - name: Guardar o registro do que foi publicado
+        if: github.event_name == 'schedule' || inputs.modo == 'publicar'
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add postado.csv || true
+          git commit -m "registro de postagem" || true
+          git pull --rebase || true
+          git push || true
