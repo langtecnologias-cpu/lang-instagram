@@ -55,8 +55,8 @@ jobs:
           fim=$(( $(date +%s) + 5*3600 + 25*60 ))
           while [ "$(date +%s)" -lt "$fim" ]; do
             python publicar.py || echo "::warning::publicar.py terminou com erro (veja acima)"
-            if [ -n "$(git status --porcelain postado.csv postado_lote2.csv)" ]; then
-              git add postado.csv postado_lote2.csv || true
+            if [ -n "$(git status --porcelain -- 'postado*.csv')" ]; then
+              git add -A -- 'postado*.csv' || true
               git commit -m "registro de postagem" || true
               git pull --rebase || true
               git push || true
@@ -68,7 +68,7 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add postado.csv postado_lote2.csv || true
+          git add -A -- 'postado*.csv' || true
           git commit -m "registro de postagem" || true
           git pull --rebase || true
           git push || true
