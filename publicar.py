@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 LANG Soluções Tecnológicas: publica no Instagram (API oficial da Meta, "Instagram API com login do Instagram")
-o que está agendado em calendario.csv: reels, carrosséis, imagens e STORIES.
+o que está agendado em calendario.csv e calendario_lote2.csv (calendários separados, cada um com seu registro):
+reels, REELS DE TESTE (trial reels), carrosséis, imagens e STORIES.
 Roda no GitHub Actions, mas funciona em qualquer lugar com Python 3.
 
 Segredos / variáveis de ambiente:
@@ -30,7 +31,8 @@ VER = os.environ.get("API_VERSION", "").strip()
 G = "https://graph.instagram.com" + (f"/{VER}" if VER else "")
 SIMULAR = "--simular" in sys.argv
 arg = lambda nome: next((a.split("=", 1)[1] for a in sys.argv if a.startswith(f"--{nome}=")), None)
-LOG = f"{AQUI}/postado.csv"
+# calendários separados: (arquivo do calendário, arquivo de registro). O lote 2 usa ids N... e o registro postado_lote2.csv.
+CALENDARIOS = [("calendario.csv", "postado.csv"), ("calendario_lote2.csv", "postado_lote2.csv")]
 
 
 def chamar(metodo, caminho, params=None):
@@ -80,6 +82,14 @@ def publicar_reel(arquivos, legenda):
                {"media_type": "REELS", "video_url": url, "caption": legenda, "share_to_feed": "true"})["id"])
 
 
+def publicar_reel_teste(arquivos, legenda):
+    """Reel de teste (trial reel): mostrado primeiro só a quem não segue a conta; o envio aos seguidores é manual no app."""
+    url = f"{BASE_URL}/{arquivos[0]}"; conferir_url(url)
+    return publicar_container(chamar("POST", f"{IG_USER_ID}/media",
+               {"media_type": "REELS", "video_url": url, "caption": legenda,
+                "trial_params": json.dumps({"graduation_strategy": "MANUAL"})})["id"])
+
+
 def publicar_carrossel(arquivos, legenda):
     filhos = []
     for a in arquivos:
@@ -101,7 +111,7 @@ def publicar_story(arquivos, legenda):
     return publicar_container(chamar("POST", f"{IG_USER_ID}/media", {"media_type": "STORIES", campo: url})["id"])
 
 
-FUNCOES = {"reel": publicar_reel, "carrossel": publicar_carrossel, "imagem": publicar_imagem, "story": publicar_story}
+FUNCOES = {"reel": publicar_reel, "reel_teste": publicar_reel_teste, "carrossel": publicar_carrossel, "imagem": publicar_imagem, "story": publicar_story}
 
 
 def renovar():
@@ -121,9 +131,12 @@ def verificar():
 
 
 def ler_log():
-    if not os.path.exists(LOG):
-        return set()
-    return {l.split(";")[0] for l in open(LOG, encoding="utf-8").read().splitlines() if l}
+    feitos = set()
+    for _, log in CALENDARIOS:
+        p = f"{AQUI}/{log}"
+        if os.path.exists(p):
+            feitos |= {l.split(";")[0] for l in open(p, encoding="utf-8").read().splitlines() if l}
+    return feitos
 
 
 def main():
@@ -134,8 +147,15 @@ def main():
     agora = datetime.datetime.now(ZoneInfo("America/Sao_Paulo"))
     data_hoje = arg("data") or agora.date().isoformat()
     hora_agora = agora.strftime("%H:%M") if not arg("data") else "23:59"
-    with open(f"{AQUI}/calendario.csv", encoding="utf-8-sig", newline="") as f:
-        linhas = list(csv.DictReader(f, delimiter=";"))
+    linhas = []
+    for cal, log in CALENDARIOS:
+        if not os.path.exists(f"{AQUI}/{cal}"):
+            continue
+        with open(f"{AQUI}/{cal}", encoding="utf-8-sig", newline="") as f:
+            for r in csv.DictReader(f, delimiter=";"):
+                r["_log"] = log
+                linhas.append(r)
+    linhas.sort(key=lambda r: (r["data"], r["horario"]))
     feitos = ler_log()
     if arg("id"):
         devidos = [r for r in linhas if r["id"] == arg("id")]
@@ -149,16 +169,27 @@ def main():
         return
     if not SIMULAR and not (IG_USER_ID and TOKEN and BASE_URL):
         raise SystemExit("Faltam IG_USER_ID, IG_TOKEN ou BASE_URL.")
+    erros = 0
     for r in devidos:
         arqs = r["arquivos"].split("|")
         print(f"[{r['id']}] {r['data']} {r['horario']} {r['tipo']}: {r['frase']}")
         if SIMULAR:
             print(f"   [simulação] {len(arqs)} arquivo(s): {BASE_URL or '<BASE_URL>'}/{arqs[0]}")
             continue
-        media_id = FUNCOES[r["tipo"]](arqs, r["legenda"])
+        try:
+            media_id = FUNCOES[r["tipo"]](arqs, r["legenda"])
+        except SystemExit as e:  # um erro (ex.: reel de teste recusado) não pode travar as outras publicações
+            print(f"   ERRO em {r['id']}: {e}")
+            erros += 1
+            if r["tipo"] == "reel_teste":  # o reel de teste depende de um recurso novo da API: se for recusado, não insistir a cada 2 min
+                with open(f"{AQUI}/{r['_log']}", "a", encoding="utf-8") as f:
+                    f.write(f"{r['id']};{r['data']};{r['tipo']};ERRO-nao-repetir\n")
+            continue
         print(f"   publicado: {media_id}")
-        with open(LOG, "a", encoding="utf-8") as f:
+        with open(f"{AQUI}/{r['_log']}", "a", encoding="utf-8") as f:
             f.write(f"{r['id']};{r['data']};{r['tipo']};{media_id}\n")
+    if erros:
+        raise SystemExit(f"{erros} publicação(ões) com erro; as demais seguiram normalmente.")
 
 
 if __name__ == "__main__":
