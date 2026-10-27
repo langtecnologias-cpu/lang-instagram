@@ -1,15 +1,16 @@
-# Publica no Instagram. Roda a cada 10 minutos entre 07h e 21h (Brasília) = 10:00 a 23:59 UTC.
-# O script publica o que estiver "devido" (horário do calendario.csv já passou) e ainda não saiu.
-# O GitHub pode atrasar o horário em alguns minutos.
+# Publica no Instagram. PROPOSTA: em vez de depender de um agendamento a cada 10 min (que o GitHub quase não disparou),
+# cada execução fica ligada ~5h30 e confere o calendário a cada 2 minutos. Três partidas por dia, em minutos "quebrados".
+# O script publica o que estiver "devido" (horário já passou) e ainda não saiu; calendários: calendario.csv e calendario_lote2.csv.
 name: postar-no-instagram
 on:
   schedule:
-    - cron: "*/10 10-23 * * *"
-    - cron: "5 14 * * *"
+    - cron: "7 10 * * *"
+    - cron: "23 15 * * *"
+    - cron: "51 19 * * *"
   workflow_dispatch:
     inputs:
       modo:
-        description: "verificar = só testa o token | simular = mostra o que publicaria | publicar = publica o que estiver devido"
+        description: "verificar = só testa o token | simular = mostra o que publicaria | publicar = publica o que estiver devido (uma vez)"
         default: "verificar"
         type: choice
         options: [verificar, simular, publicar]
@@ -24,6 +25,7 @@ concurrency:
 jobs:
   postar:
     runs-on: ubuntu-latest
+    timeout-minutes: 345
     env:
       IG_USER_ID: ${{ secrets.IG_USER_ID }}
       IG_TOKEN: ${{ secrets.IG_TOKEN }}
@@ -36,21 +38,37 @@ jobs:
       - name: Verificar token
         if: github.event_name == 'schedule' || inputs.modo == 'verificar'
         run: python publicar.py --verificar
-      - name: Renovar token (1 vez por dia, mantém a validade em ~60 dias)
-        if: github.event.schedule == '5 14 * * *'
+      - name: Renovar token (mantém a validade em ~60 dias)
+        if: github.event_name == 'schedule'
         run: python publicar.py --renovar || echo "::warning::não consegui renovar o token agora"
       - name: Simular
         if: inputs.modo == 'simular'
         run: python publicar.py --simular ${{ inputs.id != '' && format('--id={0}', inputs.id) || '' }}
-      - name: Publicar o que está na hora
-        if: github.event_name == 'schedule' || inputs.modo == 'publicar'
+      - name: Publicar uma vez (manual)
+        if: inputs.modo == 'publicar'
         run: python publicar.py ${{ inputs.id != '' && format('--id={0}', inputs.id) || '' }}
-      - name: Guardar o registro do que foi publicado
-        if: always() && (github.event_name == 'schedule' || inputs.modo == 'publicar')
+      - name: Vigiar o calendário e publicar na hora (agendado)
+        if: github.event_name == 'schedule'
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add postado.csv || true
+          fim=$(( $(date +%s) + 5*3600 + 25*60 ))
+          while [ "$(date +%s)" -lt "$fim" ]; do
+            python publicar.py || echo "::warning::publicar.py terminou com erro (veja acima)"
+            if [ -n "$(git status --porcelain postado.csv postado_lote2.csv)" ]; then
+              git add postado.csv postado_lote2.csv || true
+              git commit -m "registro de postagem" || true
+              git pull --rebase || true
+              git push || true
+            fi
+            sleep 120
+          done
+      - name: Guardar o registro do que foi publicado (manual)
+        if: always() && inputs.modo == 'publicar'
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add postado.csv postado_lote2.csv || true
           git commit -m "registro de postagem" || true
           git pull --rebase || true
           git push || true
