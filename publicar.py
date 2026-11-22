@@ -32,7 +32,7 @@ G = "https://graph.instagram.com" + (f"/{VER}" if VER else "")
 SIMULAR = "--simular" in sys.argv
 arg = lambda nome: next((a.split("=", 1)[1] for a in sys.argv if a.startswith(f"--{nome}=")), None)
 # calendários separados: (arquivo do calendário, arquivo de registro). O lote 2 usa ids N... e o registro postado_lote2.csv.
-CALENDARIOS = [("calendario.csv", "postado.csv"), ("calendario_lote2.csv", "postado_lote2.csv")]
+CALENDARIOS = [("calendario.csv", "postado.csv"), ("calendario_lote2.csv", "postado_lote2.csv"), ("calendario_lote3.csv", "postado_lote3.csv")]
 
 
 def chamar(metodo, caminho, params=None):
